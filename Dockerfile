@@ -30,6 +30,13 @@ WORKDIR /app/bridge
 RUN npm install && npm run build
 WORKDIR /app
 
+# Optional: Install Camoufox for browse tool
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libgtk-3-0 libasound2 libx11-xcb1 && \
+    rm -rf /var/lib/apt/lists/* && \
+    uv pip install --system --no-cache camoufox>=0.4.0 && \
+    python -m camoufox fetch
+
 # Create config directory
 RUN mkdir -p /root/.nanobot
 

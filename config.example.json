@@ -21,7 +21,7 @@
       "token": "",
       "allowFrom": [],
       "proxy": null,
-      "replyToMessage": false
+      "replyToMessage": true
     },
     "discord": {
       "enabled": false,
@@ -213,6 +213,11 @@
       "search": {
         "apiKey": "",
         "maxResults": 5
+      },
+      "browse": {
+        "enabled": true,
+        "maxChars": 50000,
+        "screenshotDir": "screenshots"
       }
     },
     "exec": {

@@ -240,10 +240,19 @@ class WebSearchConfig(Base):
     max_results: int = 5
 
 
+class WebBrowseToolConfig(Base):
+    """Headless browser tool configuration."""
+
+    enabled: bool = False
+    max_chars: int = 50000
+    screenshot_dir: str = "screenshots"
+
+
 class WebToolsConfig(Base):
     """Web tools configuration."""
 
     search: WebSearchConfig = Field(default_factory=WebSearchConfig)
+    browse: WebBrowseToolConfig = Field(default_factory=WebBrowseToolConfig)
 
 
 class ExecToolConfig(Base):

@@ -27,7 +27,7 @@ from nanobot.providers.base import LLMProvider
 from nanobot.session.manager import Session, SessionManager
 
 if TYPE_CHECKING:
-    from nanobot.config.schema import ExecToolConfig
+    from nanobot.config.schema import ExecToolConfig, WebBrowseToolConfig
     from nanobot.cron.service import CronService
 
 
@@ -55,6 +55,7 @@ class AgentLoop:
         memory_window: int = 50,
         brave_api_key: str | None = None,
         exec_config: ExecToolConfig | None = None,
+        browse_config: WebBrowseToolConfig | None = None,
         cron_service: CronService | None = None,
         restrict_to_workspace: bool = False,
         session_manager: SessionManager | None = None,
@@ -71,6 +72,7 @@ class AgentLoop:
         self.memory_window = memory_window
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
+        self.browse_config = browse_config
         self.cron_service = cron_service
         self.restrict_to_workspace = restrict_to_workspace
 
@@ -86,10 +88,12 @@ class AgentLoop:
             max_tokens=self.max_tokens,
             brave_api_key=brave_api_key,
             exec_config=self.exec_config,
+            browse_config=self.browse_config,
             restrict_to_workspace=restrict_to_workspace,
         )
 
         self._running = False
+        self._browse_tool = None
         self._mcp_servers = mcp_servers or {}
         self._mcp_stack: AsyncExitStack | None = None
         self._mcp_connected = False
@@ -109,6 +113,17 @@ class AgentLoop:
         ))
         self.tools.register(WebSearchTool(api_key=self.brave_api_key))
         self.tools.register(WebFetchTool())
+        if self.browse_config and self.browse_config.enabled:
+            try:
+                from nanobot.agent.tools.browse import WebBrowseTool
+                self._browse_tool = WebBrowseTool(
+                    workspace=self.workspace,
+                    max_chars=self.browse_config.max_chars,
+                    screenshot_dir=self.browse_config.screenshot_dir,
+                )
+                self.tools.register(self._browse_tool)
+            except ImportError:
+                logger.warning("WebBrowseTool enabled but camoufox not installed")
         self.tools.register(MessageTool(send_callback=self.bus.publish_outbound))
         self.tools.register(SpawnTool(manager=self.subagents))
         if self.cron_service:
@@ -264,6 +279,12 @@ class AgentLoop:
             except (RuntimeError, BaseExceptionGroup):
                 pass  # MCP SDK cancel scope cleanup is noisy but harmless
             self._mcp_stack = None
+
+    async def close(self) -> None:
+        """Close all async resources (MCP, browse tool, etc.)."""
+        await self.close_mcp()
+        if self._browse_tool:
+            await self._browse_tool.close()
 
     def stop(self) -> None:
         """Stop the agent loop."""

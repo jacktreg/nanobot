@@ -36,6 +36,7 @@ class SubagentManager:
         max_tokens: int = 4096,
         brave_api_key: str | None = None,
         exec_config: "ExecToolConfig | None" = None,
+        browse_config: "WebBrowseToolConfig | None" = None,
         restrict_to_workspace: bool = False,
     ):
         from nanobot.config.schema import ExecToolConfig
@@ -47,6 +48,7 @@ class SubagentManager:
         self.max_tokens = max_tokens
         self.brave_api_key = brave_api_key
         self.exec_config = exec_config or ExecToolConfig()
+        self.browse_config = browse_config
         self.restrict_to_workspace = restrict_to_workspace
         self._running_tasks: dict[str, asyncio.Task[None]] = {}
     
@@ -98,7 +100,8 @@ class SubagentManager:
     ) -> None:
         """Execute the subagent task and announce the result."""
         logger.info("Subagent [{}] starting task: {}", task_id, label)
-        
+        browse_tool = None
+
         try:
             # Build subagent tools (no message tool, no spawn tool)
             tools = ToolRegistry()
@@ -114,7 +117,18 @@ class SubagentManager:
             ))
             tools.register(WebSearchTool(api_key=self.brave_api_key))
             tools.register(WebFetchTool())
-            
+            if self.browse_config and self.browse_config.enabled:
+                try:
+                    from nanobot.agent.tools.browse import WebBrowseTool
+                    browse_tool = WebBrowseTool(
+                        workspace=self.workspace,
+                        max_chars=self.browse_config.max_chars,
+                        screenshot_dir=self.browse_config.screenshot_dir,
+                    )
+                    tools.register(browse_tool)
+                except ImportError:
+                    pass
+
             # Build messages with subagent-specific prompt
             system_prompt = self._build_subagent_prompt(task)
             messages: list[dict[str, Any]] = [
@@ -177,11 +191,14 @@ class SubagentManager:
             
             logger.info("Subagent [{}] completed successfully", task_id)
             await self._announce_result(task_id, label, task, final_result, origin, "ok")
-            
+
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             logger.error("Subagent [{}] failed: {}", task_id, e)
             await self._announce_result(task_id, label, task, error_msg, origin, "error")
+        finally:
+            if browse_tool is not None:
+                await browse_tool.close()
     
     async def _announce_result(
         self,
