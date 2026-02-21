@@ -3,7 +3,7 @@ x-common-config: &common-config
     context: .
     dockerfile: Dockerfile
   volumes:
-    - ~/.nanobot:/root/.nanobot
+    - /home/jack/.nanobot:/root/.nanobot
 
 services:
   nanobot-gateway:
@@ -21,6 +21,7 @@ services:
         reservations:
           cpus: '0.25'
           memory: 256M
+    network_mode: 'host'
   
   nanobot-cli:
     <<: *common-config
@@ -29,3 +30,6 @@ services:
     command: ["status"]
     stdin_open: true
     tty: true
+    network_mode: 'host'
+
+
