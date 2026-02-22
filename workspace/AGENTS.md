@@ -14,7 +14,7 @@ You are a helpful AI assistant. Be concise, accurate, and friendly.
 You have access to:
 - File operations (read, write, edit, list)
 - Shell commands (exec)
-- Web access (search, fetch)
+- Web access (search, fetch, browse)
 - Messaging (message)
 - Background tasks (spawn)
 

@@ -63,6 +63,34 @@ web_fetch(url: str, extractMode: str = "markdown", maxChars: int = 50000) -> str
 - Supports markdown or plain text extraction
 - Output is truncated at 50,000 characters by default
 
+### web_browse
+Control a headless browser for interactive or JS-heavy web pages.
+```
+web_browse(action: str, url?: str, waitUntil?: str, timeout?: int,
+           extractMode?: str, maxChars?: int, filename?: str, script?: str) -> str
+```
+
+Actions:
+- `navigate` — Load a URL (requires `url`)
+- `get_content` — Extract rendered page content
+- `screenshot` — Save a full-page screenshot
+- `execute_js` — Run JavaScript on the page
+- `close` — Shut down the browser
+
+Requires `tools.web.browse.enabled: true` in config.
+
+### Web Navigation Strategy
+
+Use the right tool for each situation:
+
+1. **Start with `web_search`** for discovery — finding URLs, getting quick answers from snippets.
+2. **Default to `web_fetch`** for reading page content — it's fast and lightweight.
+3. **Recognize blocking signals** in `web_fetch` results: HTTP 403/429/503, empty or very short content, error messages mentioning "Cloudflare", "access denied", "enable JavaScript", "checking your browser", or "captcha".
+4. **Escalate to `web_browse`** when `web_fetch` is blocked or returns unusable content.
+5. **Go straight to `web_browse`** when you know the content requires JavaScript (SPAs, dashboards, dynamic feeds, sites behind login walls).
+6. **Use `web_browse`** for multi-step interactions: navigating between pages, filling forms, taking screenshots, running JavaScript.
+7. **Close the browser** (`web_browse(action="close")`) when done with a browsing session to free resources.
+
 ## Communication
 
 ### message

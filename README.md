@@ -865,6 +865,38 @@ docker run -v ~/.nanobot:/root/.nanobot --rm nanobot agent -m "Hello!"
 docker run -v ~/.nanobot:/root/.nanobot --rm nanobot status
 ```
 
+### Data & Backup
+
+All persistent state lives in `~/.nanobot/`:
+
+| Path | Contents |
+|------|----------|
+| `config.json` | API keys, model settings, channel tokens |
+| `workspace/sessions/` | Conversation history (JSONL per chat) |
+| `workspace/memory/` | Long-term memory (`MEMORY.md`, `HISTORY.md`) |
+| `workspace/skills/` | Custom user-defined skills |
+| `workspace/screenshots/` | Web browsing screenshots |
+| `workspace/*.md` | Agent personality & instructions |
+| `cron/jobs.json` | Scheduled task definitions |
+| `media/` | Images/files received from channels |
+| `bridge/` | WhatsApp bridge (rebuildable) |
+| `history/` | CLI command history |
+
+**Backup:**
+```bash
+tar -czf nanobot-backup.tar.gz ~/.nanobot/
+```
+
+**Restore:**
+```bash
+tar -xzf nanobot-backup.tar.gz -C ~/
+```
+
+> **Future improvements:**
+> - Add a `nanobot-backup` Docker Compose service behind a `backup` profile for one-command backups
+> - Exclude `bridge/` (rebuildable) from backups to save space
+> - Separate config from runtime data for different backup frequencies
+
 ## 📁 Project Structure
 
 ```
