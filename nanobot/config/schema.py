@@ -218,6 +218,16 @@ class ChannelsConfig(Base):
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
+class RoutingConfig(Base):
+    """Per-query LLM routing configuration (local <-> cloud)."""
+
+    enabled: bool = False
+    strong_model: str = ""  # Cloud model for hard queries (e.g. "anthropic/claude-sonnet-4")
+    strong_provider: str = ""  # Provider config name for the strong model (e.g. "openrouter")
+    trigger: Literal["auto", "manual", "always-strong"] = "auto"
+    threshold: int = 3  # Difficulty score 1-5; >= threshold routes to strong model
+
+
 class AgentDefaults(Base):
     """Default agent configuration."""
 
@@ -231,6 +241,7 @@ class AgentDefaults(Base):
     max_tool_iterations: int = 40
     memory_window: int = 100
     reasoning_effort: str | None = None  # low / medium / high — enables LLM thinking mode
+    routing: RoutingConfig = Field(default_factory=RoutingConfig)
 
 
 class AgentsConfig(Base):

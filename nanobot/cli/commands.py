@@ -213,6 +213,7 @@ def onboard():
 
 def _make_provider(config: Config):
     """Create the appropriate LLM provider from config."""
+    from loguru import logger
     from nanobot.providers.openai_codex_provider import OpenAICodexProvider
     from nanobot.providers.azure_openai_provider import AzureOpenAIProvider
 
@@ -255,13 +256,46 @@ def _make_provider(config: Config):
         console.print("Set one in ~/.nanobot/config.json under providers section")
         raise typer.Exit(1)
 
-    return LiteLLMProvider(
+    default_provider = LiteLLMProvider(
         api_key=p.api_key if p else None,
         api_base=config.get_api_base(model),
         default_model=model,
         extra_headers=p.extra_headers if p else None,
         provider_name=provider_name,
     )
+
+    # Wrap with routing provider when enabled.
+    routing = config.agents.defaults.routing
+    if routing.enabled and routing.strong_model and routing.strong_provider:
+        strong_p = getattr(config.providers, routing.strong_provider, None)
+        if strong_p and strong_p.api_key:
+            from nanobot.providers.routing_provider import RoutingProvider
+
+            strong_provider = LiteLLMProvider(
+                api_key=strong_p.api_key,
+                api_base=config.get_api_base(routing.strong_model) if not strong_p.api_base else strong_p.api_base,
+                default_model=routing.strong_model,
+                extra_headers=strong_p.extra_headers,
+                provider_name=routing.strong_provider,
+            )
+            logger.info(
+                "Routing enabled: default={} strong={} trigger={} threshold={}",
+                model, routing.strong_model, routing.trigger, routing.threshold,
+            )
+            return RoutingProvider(
+                default_provider=default_provider,
+                strong_provider=strong_provider,
+                strong_model=routing.strong_model,
+                trigger=routing.trigger,
+                threshold=routing.threshold,
+            )
+        else:
+            logger.warning(
+                "Routing enabled but strong provider '{}' has no API key — routing disabled",
+                routing.strong_provider,
+            )
+
+    return default_provider
 
 
 def _load_runtime_config(config: str | None = None, workspace: str | None = None) -> Config:
