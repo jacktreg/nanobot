@@ -9,10 +9,13 @@
       "memoryWindow": 50,
       "routing": {
         "enabled": false,
-        "strongModel": "anthropic/claude-sonnet-4",
-        "strongProvider": "openrouter",
         "trigger": "auto",
-        "threshold": 3
+        "triageScale": 10,
+        "tiers": [
+          { "name": "fast",      "model": "qwen3:8b",           "provider": "vllm", "apiBase": "http://localhost:8000/v1", "minScore": 1, "maxScore": 3, "reasoningEffort": null },
+          { "name": "reasoning", "model": "qwq:32b",            "provider": "vllm", "apiBase": "http://localhost:8001/v1", "minScore": 4, "maxScore": 7, "reasoningEffort": "high" },
+          { "name": "cloud",     "model": "anthropic/claude-sonnet-4", "provider": "openrouter", "minScore": 8, "maxScore": 10 }
+        ]
       }
     }
   },

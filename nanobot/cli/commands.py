@@ -266,34 +266,74 @@ def _make_provider(config: Config):
 
     # Wrap with routing provider when enabled.
     routing = config.agents.defaults.routing
-    if routing.enabled and routing.strong_model and routing.strong_provider:
-        strong_p = getattr(config.providers, routing.strong_provider, None)
-        if strong_p and strong_p.api_key:
-            from nanobot.providers.routing_provider import RoutingProvider
+    if routing.enabled:
+        from nanobot.providers.routing_provider import ResolvedTier, RoutingProvider
 
-            strong_provider = LiteLLMProvider(
-                api_key=strong_p.api_key,
-                api_base=config.get_api_base(routing.strong_model) if not strong_p.api_base else strong_p.api_base,
-                default_model=routing.strong_model,
-                extra_headers=strong_p.extra_headers,
-                provider_name=routing.strong_provider,
+        tier_configs = list(routing.tiers)
+
+        # Legacy compat: synthesize 2 tiers from old strong_model/strong_provider fields
+        if not tier_configs and routing.strong_model and routing.strong_provider:
+            from nanobot.config.schema import RoutingTierConfig
+
+            tier_configs = [
+                RoutingTierConfig(
+                    name="default", model=model, provider=provider_name or "",
+                    min_score=1, max_score=routing.threshold - 1,
+                ),
+                RoutingTierConfig(
+                    name="strong", model=routing.strong_model,
+                    provider=routing.strong_provider,
+                    min_score=routing.threshold, max_score=routing.triage_scale,
+                ),
+            ]
+            # Map legacy trigger name
+            trigger = "always-highest" if routing.trigger == "always-strong" else routing.trigger
+        else:
+            trigger = routing.trigger
+
+        resolved_tiers: list[ResolvedTier] = []
+        for tc in tier_configs:
+            tier_p = getattr(config.providers, tc.provider, None) if tc.provider else None
+            if tc.model == model and tc.provider == (provider_name or ""):
+                # Reuse the already-built default provider
+                resolved_tiers.append(ResolvedTier(
+                    name=tc.name, provider=default_provider, model=tc.model,
+                    min_score=tc.min_score, max_score=tc.max_score,
+                    reasoning_effort=tc.reasoning_effort,
+                ))
+            elif tier_p and tier_p.api_key:
+                tier_provider = LiteLLMProvider(
+                    api_key=tier_p.api_key,
+                    api_base=tc.api_base or tier_p.api_base or config.get_api_base(tc.model),
+                    default_model=tc.model,
+                    extra_headers=tier_p.extra_headers,
+                    provider_name=tc.provider,
+                )
+                resolved_tiers.append(ResolvedTier(
+                    name=tc.name, provider=tier_provider, model=tc.model,
+                    min_score=tc.min_score, max_score=tc.max_score,
+                    reasoning_effort=tc.reasoning_effort,
+                ))
+            else:
+                logger.warning(
+                    "Routing tier '{}' provider '{}' has no API key — skipping",
+                    tc.name, tc.provider,
+                )
+
+        if len(resolved_tiers) >= 2:
+            tier_names = ", ".join(
+                f"{t.name}({t.model}, effort={t.reasoning_effort or 'default'})"
+                for t in resolved_tiers
             )
-            logger.info(
-                "Routing enabled: default={} strong={} trigger={} threshold={}",
-                model, routing.strong_model, routing.trigger, routing.threshold,
-            )
+            logger.info("Routing enabled: tiers=[{}] trigger={}", tier_names, trigger)
             return RoutingProvider(
-                default_provider=default_provider,
-                strong_provider=strong_provider,
-                strong_model=routing.strong_model,
-                trigger=routing.trigger,
-                threshold=routing.threshold,
+                triage_provider=default_provider,
+                tiers=resolved_tiers,
+                trigger=trigger,
+                triage_scale=routing.triage_scale,
             )
         else:
-            logger.warning(
-                "Routing enabled but strong provider '{}' has no API key — routing disabled",
-                routing.strong_provider,
-            )
+            logger.warning("Routing enabled but fewer than 2 valid tiers — routing disabled")
 
     return default_provider
 

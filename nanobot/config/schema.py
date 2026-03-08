@@ -218,14 +218,30 @@ class ChannelsConfig(Base):
     matrix: MatrixConfig = Field(default_factory=MatrixConfig)
 
 
+class RoutingTierConfig(Base):
+    """Configuration for a single routing tier."""
+
+    name: str = ""              # e.g. "fast", "reasoning", "cloud"
+    model: str = ""             # e.g. "qwen3:8b"
+    provider: str = ""          # e.g. "vllm", "openrouter"
+    api_base: str | None = None # per-tier override (e.g. "http://localhost:8001/v1")
+    min_score: int = 1          # inclusive lower bound
+    max_score: int = 10         # inclusive upper bound
+    reasoning_effort: str | None = None  # "low", "medium", "high", or None (use global)
+
+
 class RoutingConfig(Base):
-    """Per-query LLM routing configuration (local <-> cloud)."""
+    """Per-query LLM routing configuration (N-tier)."""
 
     enabled: bool = False
-    strong_model: str = ""  # Cloud model for hard queries (e.g. "anthropic/claude-sonnet-4")
-    strong_provider: str = ""  # Provider config name for the strong model (e.g. "openrouter")
-    trigger: Literal["auto", "manual", "always-strong"] = "auto"
-    threshold: int = 3  # Difficulty score 1-5; >= threshold routes to strong model
+    tiers: list[RoutingTierConfig] = Field(default_factory=list)
+    trigger: Literal["auto", "manual", "always-highest", "always-strong"] = "auto"
+    triage_scale: int = 10      # max score value
+
+    # Legacy fields (used when tiers is empty)
+    strong_model: str = ""
+    strong_provider: str = ""
+    threshold: int = 3
 
 
 class AgentDefaults(Base):

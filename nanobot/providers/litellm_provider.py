@@ -264,6 +264,7 @@ class LiteLLMProvider(LLMProvider):
         if reasoning_effort:
             kwargs["reasoning_effort"] = reasoning_effort
             kwargs["drop_params"] = True
+            logger.debug("LiteLLM chat: reasoning_effort={}", reasoning_effort)
         
         if tools:
             kwargs["tools"] = tools
