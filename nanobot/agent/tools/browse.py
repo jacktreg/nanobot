@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-from camoufox.async_api import AsyncCamoufox
 from loguru import logger
 
 from nanobot.agent.tools.base import Tool
@@ -88,6 +87,7 @@ class WebBrowseTool(Tool):
         if self._page is not None:
             return
 
+        from camoufox.async_api import AsyncCamoufox
         self._camoufox = AsyncCamoufox(headless=True)
         browser = await self._camoufox.__aenter__()
         self._page = await browser.new_page()
