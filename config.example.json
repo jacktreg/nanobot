@@ -11,6 +11,8 @@
         "enabled": false,
         "trigger": "auto",
         "triageScale": 10,
+        "triageModel": "",
+        "triageProvider": "",
         "tiers": [
           { "name": "fast",      "model": "qwen3:8b",           "provider": "vllm", "apiBase": "http://localhost:8000/v1", "minScore": 1, "maxScore": 3, "reasoningEffort": null },
           { "name": "reasoning", "model": "qwq:32b",            "provider": "vllm", "apiBase": "http://localhost:8001/v1", "minScore": 4, "maxScore": 7, "reasoningEffort": "high" },

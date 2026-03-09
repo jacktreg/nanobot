@@ -237,6 +237,8 @@ class RoutingConfig(Base):
     tiers: list[RoutingTierConfig] = Field(default_factory=list)
     trigger: Literal["auto", "manual", "always-highest", "always-strong"] = "auto"
     triage_scale: int = 10      # max score value
+    triage_model: str = ""      # model for triage scoring (default: use agent default)
+    triage_provider: str = ""   # provider for triage model (default: use agent default)
 
     # Legacy fields (used when tiers is empty)
     strong_model: str = ""

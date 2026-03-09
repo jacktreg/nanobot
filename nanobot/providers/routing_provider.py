@@ -50,18 +50,27 @@ class RoutingProvider(LLMProvider):
     def _highest_tier(self) -> ResolvedTier:
         return self.tiers[-1]
 
-    def _build_triage_prompt(self) -> str:
+    def _build_triage_prompt(self, context_summary: str | None = None) -> str:
         tier_descriptions = []
         for t in self.tiers:
             tier_descriptions.append(
-                f"- Score {t.min_score}-{t.max_score}: {t.name} (model: {t.model})"
+                f"- Score {t.min_score}-{t.max_score}: {t.name}"
             )
         tiers_text = "\n".join(tier_descriptions)
-        return (
-            f"Rate the complexity of the following user query on a scale of 1-{self.triage_scale}. "
-            f"The tiers are:\n{tiers_text}\n"
-            f"Respond with ONLY a single integer from 1 to {self.triage_scale}."
+        prompt = (
+            f"You are a query complexity scorer. Rate the user's query from 1 to {self.triage_scale}.\n"
+            f"1 = simple greeting or trivial question\n"
+            f"{self.triage_scale} = complex analysis, multi-step reasoning, or expert knowledge\n"
+            f"Tiers:\n{tiers_text}\n\n"
         )
+        if context_summary:
+            prompt += (
+                f"Recent conversation context:\n{context_summary}\n\n"
+                f"Consider this context when scoring — a short follow-up to a complex discussion "
+                f"should score similarly to the original discussion.\n\n"
+            )
+        prompt += "Reply with ONLY a single number, nothing else."
+        return prompt
 
     # ------------------------------------------------------------------
     # Tier selection
@@ -128,6 +137,58 @@ class RoutingProvider(LLMProvider):
         return None, messages
 
     # ------------------------------------------------------------------
+    # Conversation context for triage
+    # ------------------------------------------------------------------
+
+    def _extract_recent_context(
+        self, messages: list[dict[str, Any]]
+    ) -> str | None:
+        """Extract a compact summary of the most recent exchange for triage context.
+
+        Walks backward through messages (skipping the current user message and
+        tool-role messages) to find the last assistant reply and the user message
+        before it. Returns a truncated summary string, or None if no history.
+        """
+        assistant_text: str | None = None
+        prior_user_text: str | None = None
+
+        # Skip the last message (the current user query).
+        history = messages[:-1] if messages else []
+
+        for msg in reversed(history):
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            # Skip tool messages and non-string content.
+            if role == "tool" or not isinstance(content, str):
+                continue
+
+            if role == "assistant" and assistant_text is None:
+                assistant_text = content.strip()
+            elif role == "user" and assistant_text is not None:
+                prior_user_text = content.strip()
+                break
+
+        if assistant_text is None:
+            return None
+
+        # Strip [Runtime Context ...] prefix from prior user message.
+        if prior_user_text:
+            if prior_user_text.startswith("[Runtime Context"):
+                # Format: tag + newline + metadata, separated from content by \n\n
+                parts = prior_user_text.split("\n\n", 1)
+                prior_user_text = parts[1].strip() if len(parts) > 1 else ""
+            prior_user_text = prior_user_text[:150]
+
+        assistant_text = assistant_text[:300]
+
+        parts = []
+        if prior_user_text:
+            parts.append(f"Previous user message: {prior_user_text}")
+        parts.append(f"Assistant reply: {assistant_text}")
+        return "\n".join(parts)
+
+    # ------------------------------------------------------------------
     # Triage
     # ------------------------------------------------------------------
 
@@ -143,8 +204,9 @@ class RoutingProvider(LLMProvider):
         if not user_text:
             return 1
 
+        context_summary = self._extract_recent_context(messages)
         triage_messages = [
-            {"role": "system", "content": self._build_triage_prompt()},
+            {"role": "system", "content": self._build_triage_prompt(context_summary)},
             {"role": "user", "content": user_text},
         ]
 
@@ -152,14 +214,20 @@ class RoutingProvider(LLMProvider):
             resp = await self.triage_provider.chat(
                 messages=triage_messages,
                 tools=None,
-                max_tokens=1024,
+                max_tokens=32,
+                temperature=0.0,
                 reasoning_effort=None,
             )
+            # Check content first, then fall back to reasoning_content
             text = (resp.content or "").strip()
-            # Extract any integer from 1 to triage_scale
-            match = re.search(r"\d+", text)
-            if match:
-                score = int(match.group())
+            if not text and resp.reasoning_content:
+                text = resp.reasoning_content.strip()
+                logger.debug("Triage: content was empty, extracted from reasoning_content")
+            logger.debug("Triage raw response: content={!r}, reasoning_content={!r}", resp.content, resp.reasoning_content)
+            # Extract the last integer — reasoning models put the answer at the end
+            nums = re.findall(r"\d+", text)
+            if nums:
+                score = int(nums[-1])
                 score = max(1, min(score, self.triage_scale))
                 logger.info("Routing triage score: {}/{}", score, self.triage_scale)
                 return score
@@ -210,7 +278,7 @@ class RoutingProvider(LLMProvider):
     ) -> LLMResponse:
         tier, messages = await self._route(messages)
         effective_effort = tier.reasoning_effort or reasoning_effort
-        logger.info("Routing dispatch → tier '{}' model={} reasoning_effort={}", tier.name, tier.model, effective_effort or "none")
+        logger.info("Routing dispatch → tier '{}' model={} api_base={} reasoning_effort={}", tier.name, tier.model, tier.provider.api_base or "default", effective_effort or "none")
 
         return await tier.provider.chat(
             messages,

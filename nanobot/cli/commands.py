@@ -294,7 +294,7 @@ def _make_provider(config: Config):
         resolved_tiers: list[ResolvedTier] = []
         for tc in tier_configs:
             tier_p = getattr(config.providers, tc.provider, None) if tc.provider else None
-            if tc.model == model and tc.provider == (provider_name or ""):
+            if tc.model == model and tc.provider == (provider_name or "") and not tc.api_base:
                 # Reuse the already-built default provider
                 resolved_tiers.append(ResolvedTier(
                     name=tc.name, provider=default_provider, model=tc.model,
@@ -322,12 +322,35 @@ def _make_provider(config: Config):
 
         if len(resolved_tiers) >= 2:
             tier_names = ", ".join(
-                f"{t.name}({t.model}, effort={t.reasoning_effort or 'default'})"
+                f"{t.name}({t.model}, effort={t.reasoning_effort or 'default'}, api_base={t.provider.api_base or 'default'})"
                 for t in resolved_tiers
             )
             logger.info("Routing enabled: tiers=[{}] trigger={}", tier_names, trigger)
+
+            # Build separate triage provider if configured
+            lowest = min(resolved_tiers, key=lambda t: t.min_score)
+            triage_prov = lowest.provider
+            logger.info("Triage defaults to lowest tier '{}' ({})", lowest.name, lowest.model)
+            if routing.triage_model:
+                triage_provider_name = routing.triage_provider or provider_name or ""
+                triage_p = getattr(config.providers, triage_provider_name, None) if triage_provider_name else None
+                if triage_p and triage_p.api_key:
+                    triage_prov = LiteLLMProvider(
+                        api_key=triage_p.api_key,
+                        api_base=triage_p.api_base or config.get_api_base(routing.triage_model),
+                        default_model=routing.triage_model,
+                        extra_headers=triage_p.extra_headers,
+                        provider_name=triage_provider_name,
+                    )
+                    logger.info("Triage model: {} via {}", routing.triage_model, triage_provider_name)
+                else:
+                    logger.warning(
+                        "Triage provider '{}' has no API key — falling back to default provider",
+                        triage_provider_name,
+                    )
+
             return RoutingProvider(
-                triage_provider=default_provider,
+                triage_provider=triage_prov,
                 tiers=resolved_tiers,
                 trigger=trigger,
                 triage_scale=routing.triage_scale,
