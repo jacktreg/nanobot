@@ -193,6 +193,9 @@ class AgentLoop:
             return f'{tc.name}("{val[:40]}…")' if len(val) > 40 else f'{tc.name}("{val}")'
         return ", ".join(_fmt(tc) for tc in tool_calls)
 
+    _DEGENERATE_EXACT_THRESHOLD = 2  # break after 2nd duplicate exact call
+    _DEGENERATE_TOOL_THRESHOLD = 8  # break if any single tool called this many times
+
     async def _run_agent_loop(
         self,
         initial_messages: list[dict],
@@ -204,6 +207,8 @@ class AgentLoop:
         final_content = None
         tools_used: list[str] = []
         resp_meta: dict[str, Any] = {}
+        call_sigs: dict[str, int] = {}   # "name|args" -> count
+        tool_counts: dict[str, int] = {}  # tool_name -> total count
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -218,6 +223,33 @@ class AgentLoop:
             )
 
             if response.has_tool_calls:
+                # --- Degenerate loop detection ---
+                degenerate = False
+                for tc in response.tool_calls:
+                    sig = f"{tc.name}|{json.dumps(tc.arguments, sort_keys=True)}"
+                    call_sigs[sig] = call_sigs.get(sig, 0) + 1
+                    tool_counts[tc.name] = tool_counts.get(tc.name, 0) + 1
+                    if call_sigs[sig] > self._DEGENERATE_EXACT_THRESHOLD:
+                        logger.warning(
+                            "Degenerate loop: {}() repeated {} times with same args",
+                            tc.name, call_sigs[sig],
+                        )
+                        degenerate = True
+                        break
+                    if tool_counts[tc.name] > self._DEGENERATE_TOOL_THRESHOLD:
+                        logger.warning(
+                            "Degenerate loop: {} called {} total times",
+                            tc.name, tool_counts[tc.name],
+                        )
+                        degenerate = True
+                        break
+                if degenerate:
+                    final_content = (
+                        "I got stuck in a loop repeating the same actions. "
+                        "Please try rephrasing your request."
+                    )
+                    break
+
                 if on_progress:
                     thought = self._strip_think(response.content)
                     if thought:

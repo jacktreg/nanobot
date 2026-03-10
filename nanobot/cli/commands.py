@@ -525,10 +525,20 @@ def gateway(
         await bus.publish_outbound(OutboundMessage(channel=channel, chat_id=chat_id, content=response))
 
     hb_cfg = config.gateway.heartbeat
+    # Use the fast/lowest tier directly for heartbeat decisions to avoid
+    # unnecessary triage overhead every tick.
+    hb_provider, hb_model = provider, agent.model
+    try:
+        from nanobot.providers.routing_provider import RoutingProvider
+        if isinstance(provider, RoutingProvider):
+            hb_provider = provider._lowest_tier.provider
+            hb_model = provider._lowest_tier.model
+    except ImportError:
+        pass
     heartbeat = HeartbeatService(
         workspace=config.workspace_path,
-        provider=provider,
-        model=agent.model,
+        provider=hb_provider,
+        model=hb_model,
         on_execute=on_heartbeat_execute,
         on_notify=on_heartbeat_notify,
         interval_s=hb_cfg.interval_s,
