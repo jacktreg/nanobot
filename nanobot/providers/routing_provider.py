@@ -61,6 +61,7 @@ class RoutingProvider(LLMProvider):
             f"You are a query complexity scorer. Rate the user's query from 1 to {self.triage_scale}.\n"
             f"1 = simple greeting or trivial question\n"
             f"{self.triage_scale} = complex analysis, multi-step reasoning, or expert knowledge\n"
+            f"{', '.join([str(x) for x in range(2, self.triage_scale)])} = require low to moderate reasoning, analysis, or knowledge\n"
             f"Tiers:\n{tiers_text}\n\n"
         )
         if context_summary:
@@ -243,25 +244,25 @@ class RoutingProvider(LLMProvider):
 
     async def _route(
         self, messages: list[dict[str, Any]]
-    ) -> tuple[ResolvedTier, list[dict[str, Any]]]:
-        """Decide which tier to route to. Returns (tier, possibly_cleaned_messages)."""
+    ) -> tuple[ResolvedTier, list[dict[str, Any]], int | None]:
+        """Decide which tier to route to. Returns (tier, possibly_cleaned_messages, score_or_None)."""
         if self.trigger in ("always-highest", "always-strong"):
             logger.info("Routing: always-highest → '{}'", self._highest_tier.name)
-            return self._highest_tier, messages
+            return self._highest_tier, messages, None
 
         # Check manual override regardless of trigger mode.
         override_tier, cleaned = self._check_manual_override(messages)
         if override_tier:
-            return override_tier, cleaned
+            return override_tier, cleaned, None
 
         if self.trigger == "manual":
-            return self._lowest_tier, messages
+            return self._lowest_tier, messages, None
 
         # Auto triage
         score = await self._triage(messages)
         tier = self._select_tier(score)
         logger.info("Routing: auto triage → tier '{}' (score={})", tier.name, score)
-        return tier, messages
+        return tier, messages, score
 
     # ------------------------------------------------------------------
     # LLMProvider interface
@@ -276,11 +277,11 @@ class RoutingProvider(LLMProvider):
         temperature: float = 0.7,
         reasoning_effort: str | None = None,
     ) -> LLMResponse:
-        tier, messages = await self._route(messages)
+        tier, messages, score = await self._route(messages)
         effective_effort = tier.reasoning_effort or reasoning_effort
         logger.info("Routing dispatch → tier '{}' model={} api_base={} reasoning_effort={}", tier.name, tier.model, tier.provider.api_base or "default", effective_effort or "none")
 
-        return await tier.provider.chat(
+        response = await tier.provider.chat(
             messages,
             tools=tools,
             model=tier.model,
@@ -288,6 +289,12 @@ class RoutingProvider(LLMProvider):
             temperature=temperature,
             reasoning_effort=effective_effort,
         )
+        response.metadata["_routing"] = {
+            "tier": tier.name,
+            "score": score,
+            "scale": self.triage_scale,
+        }
+        return response
 
     def get_default_model(self) -> str:
         return self._lowest_tier.model

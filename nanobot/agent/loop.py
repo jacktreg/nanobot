@@ -197,12 +197,13 @@ class AgentLoop:
         self,
         initial_messages: list[dict],
         on_progress: Callable[..., Awaitable[None]] | None = None,
-    ) -> tuple[str | None, list[str], list[dict]]:
-        """Run the agent iteration loop. Returns (final_content, tools_used, messages)."""
+    ) -> tuple[str | None, list[str], list[dict], dict[str, Any]]:
+        """Run the agent iteration loop. Returns (final_content, tools_used, messages, metadata)."""
         messages = initial_messages
         iteration = 0
         final_content = None
         tools_used: list[str] = []
+        resp_meta: dict[str, Any] = {}
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -261,6 +262,7 @@ class AgentLoop:
                     thinking_blocks=response.thinking_blocks,
                 )
                 final_content = clean
+                resp_meta = response.metadata
                 break
 
         if final_content is None and iteration >= self.max_iterations:
@@ -270,7 +272,7 @@ class AgentLoop:
                 "without completing the task. You can try breaking the task into smaller steps."
             )
 
-        return final_content, tools_used, messages
+        return final_content, tools_used, messages, resp_meta
 
     async def run(self) -> None:
         """Run the agent loop, dispatching messages as tasks to stay responsive to /stop."""
@@ -369,7 +371,7 @@ class AgentLoop:
                 history=history,
                 current_message=msg.content, channel=channel, chat_id=chat_id,
             )
-            final_content, _, all_msgs = await self._run_agent_loop(messages)
+            final_content, _, all_msgs, _ = await self._run_agent_loop(messages)
             self._save_turn(session, all_msgs, 1 + len(history))
             self.sessions.save(session)
             return OutboundMessage(channel=channel, chat_id=chat_id,
@@ -454,7 +456,7 @@ class AgentLoop:
                 channel=msg.channel, chat_id=msg.chat_id, content=content, metadata=meta,
             ))
 
-        final_content, _, all_msgs = await self._run_agent_loop(
+        final_content, _, all_msgs, resp_meta = await self._run_agent_loop(
             initial_messages, on_progress=on_progress or _bus_progress,
         )
 
@@ -466,6 +468,17 @@ class AgentLoop:
 
         if (mt := self.tools.get("message")) and isinstance(mt, MessageTool) and mt._sent_in_turn:
             return None
+
+        # Decorate outbound content with routing info (not stored in session)
+        routing = resp_meta.get("_routing")
+        if routing:
+            score = routing.get("score")
+            tier = routing["tier"]
+            if score is not None:
+                tag = f"_{tier} · {score}/{routing['scale']}_"
+            else:
+                tag = f"_{tier}_"
+            final_content += f"\n\n---\n{tag}"
 
         preview = final_content[:120] + "..." if len(final_content) > 120 else final_content
         logger.info("Response to {}:{}: {}", msg.channel, msg.sender_id, preview)
